@@ -150,9 +150,12 @@ class CompressionService : Service() {
                 // 收尾必须放在 finally：
                 // 早期版本把收尾写在 runLoop 末尾，一旦中途抛异常就全部跳过，
                 // 结果是通知一直挂着、UI 永远显示「正在压缩」，只能手动划掉 App。
+                // 顺序很关键：先 stopForeground 再发结果通知。
+                // 如果先发结果通知再 stopForeground(REMOVE)，系统会把刚发的通知
+                // 一起删掉，用户就永远看不到「完成 / 已取消 / 已暂停」的结果。
+                stopForegroundSafely()
                 notifier.finish(summary)
                 AppLog.i("SERVICE_FINISHED", summary)
-                stopForegroundSafely()
                 stopSelf()
                 CompressionController.setRunning(false)
             }
@@ -564,8 +567,9 @@ class CompressionService : Service() {
         scope.launch {
             runCatching { database.taskDao().resetBusyToInterrupted() }
         }
-        notifier.updateStopped("已达到系统后台处理时间上限，任务已保存，可继续处理")
+        // 先 detach 前台通知，再发结果通知，否则结果通知会被一起删掉
         stopForegroundSafely()
+        notifier.updateStopped("已达到系统后台处理时间上限，任务已保存，可继续处理")
         stopSelf()
         CompressionController.setRunning(false)
     }

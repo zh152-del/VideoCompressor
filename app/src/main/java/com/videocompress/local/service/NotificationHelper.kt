@@ -80,19 +80,31 @@ class NotificationHelper(private val context: Context) {
         )
     }
 
-    /** 因为电量 / 温度 / 存储等原因主动停止 */
+    /** 因为电量 / 温度 / 存储等原因主动停止。结果态通知可点击关闭 */
     fun updateStopped(message: String) {
         manager.notify(
             NOTIFICATION_ID,
-            build(title = "压缩已暂停", text = message, progress = 100, indeterminate = false)
+            build(
+                title = "压缩已暂停",
+                text = message,
+                progress = 100,
+                indeterminate = false,
+                ongoing = false
+            )
         )
     }
 
-    /** 全部完成或用户取消 */
+    /** 全部完成或用户取消。结果态通知可点击关闭 */
     fun finish(message: String) {
         manager.notify(
             NOTIFICATION_ID,
-            build(title = "视频压缩结束", text = message, progress = 100, indeterminate = false)
+            build(
+                title = "视频压缩结束",
+                text = message,
+                progress = 100,
+                indeterminate = false,
+                ongoing = false
+            )
         )
     }
 
@@ -100,7 +112,9 @@ class NotificationHelper(private val context: Context) {
         title: String,
         text: String,
         progress: Int,
-        indeterminate: Boolean
+        indeterminate: Boolean,
+        /** 进行中是常驻(ongoing)；结束/暂停是结果态，可让用户划掉 */
+        ongoing: Boolean = true
     ): Notification {
         val contentIntent = PendingIntent.getActivity(
             context,
@@ -123,10 +137,11 @@ class NotificationHelper(private val context: Context) {
             .setContentTitle(title)
             .setContentText(text)
             .setProgress(100, progress, indeterminate)
-            .setOngoing(true)
+            .setOngoing(ongoing)
             .setOnlyAlertOnce(true)
             .setContentIntent(contentIntent)
             .setCategory(NotificationCompat.CATEGORY_PROGRESS)
+            .apply { if (!ongoing) setAutoCancel(true) }
             // 只提供「取消」：暂停在 Media3 Transformer 上没有可靠实现，不做假按钮
             .addAction(
                 R.drawable.ic_stat_compress,

@@ -31,6 +31,10 @@ local.properties
 *.log
 *.pid
 
+# Audit scratch / one-off helpers
+force_rm.py
+build_results.txt
+
 # Android Studio / IntelliJ
 *.iml
 .idea/
