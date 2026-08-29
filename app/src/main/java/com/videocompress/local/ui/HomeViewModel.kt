@@ -7,6 +7,7 @@ import com.videocompress.local.data.AppDatabase
 import com.videocompress.local.data.AppSettings
 import com.videocompress.local.data.LogEntry
 import com.videocompress.local.data.SettingsRepository
+import com.videocompress.local.data.SyncResult
 import com.videocompress.local.data.TaskCounts
 import com.videocompress.local.data.TaskRepository
 import com.videocompress.local.data.VideoTask
@@ -72,6 +73,10 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     private val _toast = MutableStateFlow<String?>(null)
     val toast: StateFlow<String?> = _toast.asStateFlow()
 
+    /** 最近一次扫描的完整结果（含已跳过视频），用于首页展示「重复/太小」入口 */
+    private val _lastScanResult = MutableStateFlow<SyncResult?>(null)
+    val lastScanResult: StateFlow<SyncResult?> = _lastScanResult.asStateFlow()
+
     // ------------------------------------------------------------------ 扫描
 
     fun scan() {
@@ -82,7 +87,14 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             runCatching {
                 val videos = MediaStoreScanner.scan(context)
                 val result = repository.syncFromMediaStore(videos, settings.value)
-                _toast.value = "发现 ${videos.size} 个视频，新增 ${result.added} 个任务"
+                _lastScanResult.value = result
+                val skippedTotal = result.skipped.size
+                val alreadyCount = result.countBy(com.videocompress.local.data.SkipReason.ALREADY_IN_QUEUE)
+                val tooSmallCount = result.countBy(com.videocompress.local.data.SkipReason.BELOW_MIN_SIZE)
+                _toast.value = when {
+                    skippedTotal > 0 -> "扫描 ${videos.size} 个：新增 ${result.added}，已在队列 ${alreadyCount}，低于限制 ${tooSmallCount}"
+                    else -> "发现 ${videos.size} 个视频，新增 ${result.added} 个任务"
+                }
             }.onFailure {
                 AppLog.e("SCAN_ERROR", "扫描失败：${it.message}")
                 _toast.value = "扫描失败：${it.message}"
@@ -120,6 +132,37 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     fun retryOne(id: Long) {
         viewModelScope.launch(Dispatchers.IO) { repository.retryOne(id) }
+    }
+
+    /** 用户在扫描结果页把「已在队列中」的重复视频移除（仅删 DB 任务，不删原文件） */
+    fun removeTask(id: Long) {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                repository.removeTask(id)
+                _toast.value = "已从队列移除"
+            }.onFailure {
+                AppLog.e("REMOVE_TASK", "移除任务失败：${it.message}")
+                _toast.value = "移除失败：${it.message}"
+            }
+        }
+    }
+
+    /** 按 Uri 移除任务：扫描结果页只有 SkippedVideo，没有 task id */
+    fun removeTaskByUri(uri: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                val task = repository.getTaskByUri(uri)
+                if (task != null) {
+                    repository.removeTask(task.id)
+                    _toast.value = "已从队列移除：${task.originalName}"
+                } else {
+                    _toast.value = "该视频已不在队列中"
+                }
+            }.onFailure {
+                AppLog.e("REMOVE_TASK_BY_URI", "按 Uri 移除任务失败：${it.message}")
+                _toast.value = "移除失败：${it.message}"
+            }
+        }
     }
 
     /** 用户在系统弹窗中确认删除原视频之后，刷新任务状态 */

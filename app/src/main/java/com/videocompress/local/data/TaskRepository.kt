@@ -8,8 +8,35 @@ import com.videocompress.local.util.AppLog
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 
+/** 扫描时被跳过的原因 */
+enum class SkipReason(val label: String) {
+    ALREADY_IN_QUEUE("已在队列中"),
+    BELOW_MIN_SIZE("低于最小大小限制"),
+    OWN_OUTPUT("本应用输出文件")
+}
+
+/** 一次扫描中被跳过的视频 */
+data class SkippedVideo(
+    val uri: String,
+    val name: String,
+    val size: Long,
+    val durationMs: Long,
+    val width: Int,
+    val height: Int,
+    val reason: SkipReason
+)
+
 /** 一次扫描的同步结果 */
-data class SyncResult(val added: Int, val updated: Int, val total: Int)
+data class SyncResult(
+    val added: Int,
+    val updated: Int,
+    val total: Int,
+    val skipped: List<SkippedVideo>,
+    val minSizeMb: Int
+) {
+    /** 按原因统计 */
+    fun countBy(reason: SkipReason): Int = skipped.count { it.reason == reason }
+}
 
 /**
  * 任务仓库：把 MediaStore 的扫描结果同步成任务队列。
@@ -30,6 +57,8 @@ class TaskRepository(context: Context) {
 
     fun observeCounts(): Flow<TaskCounts> = combineCounts()
 
+    suspend fun getTaskByUri(uri: String): VideoTask? = dao.getByUri(uri)
+
     suspend fun syncFromMediaStore(
         videos: List<ScannedVideo>,
         settings: AppSettings
@@ -39,56 +68,80 @@ class TaskRepository(context: Context) {
         val now = System.currentTimeMillis()
 
         val newTasks = mutableListOf<VideoTask>()
+        val skipped = mutableListOf<SkippedVideo>()
         var updated = 0
 
         for (video in videos) {
-            if (minBytes > 0 && video.size < minBytes) continue
-
             val known = existing[video.uriString]
-            if (known == null) {
-                newTasks += VideoTask(
-                    originalUri = video.uriString,
-                    originalName = video.displayName,
-                    originalSize = video.size,
-                    originalMimeType = video.mimeType ?: "video/mp4",
-                    originalDateModified = video.dateModified,
-                    originalDateAdded = video.dateAdded,
-                    originalRelativePath = video.relativePath,
-                    durationMs = video.durationMs,
-                    width = video.width,
-                    height = video.height,
-                    rotation = 0,
-                    hasAudio = true,
-                    videoMime = null,
-                    isHdr = false,
-                    queueOrder = now,
-                    status = TaskStatus.PENDING,
-                    createdAt = now
-                )
-            } else if (known.size != video.size || known.modified != video.dateModified) {
-                dao.refreshMetadata(
-                    id = known.id,
-                    name = video.displayName,
-                    size = video.size,
-                    modified = video.dateModified,
-                    added = video.dateAdded,
-                    duration = video.durationMs,
-                    width = video.width,
-                    height = video.height,
-                    relativePath = video.relativePath
-                )
-                updated++
+            when {
+                known != null -> {
+                    skipped += SkippedVideo(
+                        uri = video.uriString,
+                        name = video.displayName,
+                        size = video.size,
+                        durationMs = video.durationMs,
+                        width = video.width,
+                        height = video.height,
+                        reason = SkipReason.ALREADY_IN_QUEUE
+                    )
+                    if (known.size != video.size || known.modified != video.dateModified) {
+                        dao.refreshMetadata(
+                            id = known.id,
+                            name = video.displayName,
+                            size = video.size,
+                            modified = video.dateModified,
+                            added = video.dateAdded,
+                            duration = video.durationMs,
+                            width = video.width,
+                            height = video.height,
+                            relativePath = video.relativePath
+                        )
+                        updated++
+                    }
+                }
+                minBytes > 0 && video.size < minBytes -> {
+                    skipped += SkippedVideo(
+                        uri = video.uriString,
+                        name = video.displayName,
+                        size = video.size,
+                        durationMs = video.durationMs,
+                        width = video.width,
+                        height = video.height,
+                        reason = SkipReason.BELOW_MIN_SIZE
+                    )
+                }
+                else -> {
+                    newTasks += VideoTask(
+                        originalUri = video.uriString,
+                        originalName = video.displayName,
+                        originalSize = video.size,
+                        originalMimeType = video.mimeType ?: "video/mp4",
+                        originalDateModified = video.dateModified,
+                        originalDateAdded = video.dateAdded,
+                        originalRelativePath = video.relativePath,
+                        durationMs = video.durationMs,
+                        width = video.width,
+                        height = video.height,
+                        rotation = 0,
+                        hasAudio = true,
+                        videoMime = null,
+                        isHdr = false,
+                        queueOrder = now,
+                        status = TaskStatus.PENDING,
+                        createdAt = now
+                    )
+                }
             }
         }
 
         val inserted = dao.insertAll(newTasks).count { it > 0 }
         AppLog.i(
             "SYNC_DONE",
-            "扫描同步完成 total=${videos.size} added=$inserted updated=$updated"
+            "扫描同步完成 total=${videos.size} added=$inserted updated=$updated skipped=${skipped.size}"
         )
 
         reorder(settings)
-        return SyncResult(inserted, updated, videos.size)
+        return SyncResult(inserted, updated, videos.size, skipped, settings.minSizeMb)
     }
 
     /** 按用户选择的排序规则重排「等待中」的任务 */
@@ -115,6 +168,7 @@ class TaskRepository(context: Context) {
     suspend fun retryAllFailed() = dao.retryAllFailed()
     suspend fun retryOne(id: Long) = dao.retryOne(id)
     suspend fun requeueInterrupted() = dao.requeueInterrupted()
+    suspend fun removeTask(id: Long) = dao.deleteById(id)
     suspend fun pendingDeleteTasks() = dao.getPendingDeleteTasks()
 
     /**

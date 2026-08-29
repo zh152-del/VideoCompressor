@@ -35,6 +35,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
@@ -45,6 +46,7 @@ import com.videocompress.local.ui.screens.GuideScreen
 import com.videocompress.local.ui.screens.PermissionGate
 import com.videocompress.local.ui.screens.HomeScreen
 import com.videocompress.local.ui.screens.LogsScreen
+import com.videocompress.local.ui.screens.ScanResultScreen
 import com.videocompress.local.ui.screens.SettingsScreen
 import com.videocompress.local.ui.screens.TasksScreen
 import kotlinx.coroutines.launch
@@ -54,7 +56,8 @@ private enum class Dest(val title: String) {
     TASKS("任务列表"),
     SETTINGS("设置"),
     LOGS("运行日志"),
-    GUIDE("后台运行设置指南")
+    GUIDE("后台运行设置指南"),
+    SCAN_RESULT("扫描结果")
 }
 
 /**
@@ -119,14 +122,16 @@ fun AppRoot(vm: HomeViewModel = viewModel()) {
             TopAppBar(
                 title = { Text(dest.title) },
                 navigationIcon = {
-                    if (dest == Dest.GUIDE) {
-                        IconButton(onClick = { dest = Dest.SETTINGS }) {
-                            Icon(
-                                Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "返回"
-                            )
-                        }
+                if (dest == Dest.GUIDE || dest == Dest.SCAN_RESULT) {
+                    IconButton(onClick = {
+                        dest = if (dest == Dest.GUIDE) Dest.SETTINGS else Dest.HOME
+                    }) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "返回"
+                        )
                     }
+                }
                 },
                 // 顶栏与整页背景同色，避免出现灰白色带
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -137,7 +142,7 @@ fun AppRoot(vm: HomeViewModel = viewModel()) {
             )
         },
         bottomBar = {
-            if (dest != Dest.GUIDE) {
+            if (dest != Dest.GUIDE && dest != Dest.SCAN_RESULT) {
                 BottomNav(dest) { dest = it }
             }
         },
@@ -149,11 +154,23 @@ fun AppRoot(vm: HomeViewModel = viewModel()) {
                 .padding(padding)
         ) {
             when (dest) {
-                Dest.HOME -> HomeScreen(vm) { dest = Dest.GUIDE }
+                Dest.HOME -> HomeScreen(vm, { dest = Dest.GUIDE }) { dest = Dest.SCAN_RESULT }
                 Dest.TASKS -> TasksScreen(vm)
                 Dest.SETTINGS -> SettingsScreen(vm) { dest = Dest.GUIDE }
                 Dest.LOGS -> LogsScreen(vm)
                 Dest.GUIDE -> GuideScreen()
+                Dest.SCAN_RESULT -> {
+                    val result by vm.lastScanResult.collectAsStateWithLifecycle()
+                    result?.let {
+                        ScanResultScreen(vm, it) { dest = Dest.SETTINGS }
+                    } ?: run {
+                        // 没有扫描结果时不该到这里，兜底显示提示并返回首页
+                        androidx.compose.material3.Text(
+                            text = "暂无扫描结果，请返回首页重新扫描",
+                            modifier = Modifier.padding(16.dp)
+                        )
+                    }
+                }
             }
         }
     }

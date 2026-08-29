@@ -75,6 +75,9 @@ interface TaskDao {
     @Query("SELECT * FROM video_tasks WHERE id = :id")
     suspend fun getById(id: Long): VideoTask?
 
+    @Query("DELETE FROM video_tasks WHERE id = :id")
+    suspend fun deleteById(id: Long)
+
     @Query("SELECT * FROM video_tasks WHERE originalUri = :uri")
     suspend fun getByUri(uri: String): VideoTask?
 

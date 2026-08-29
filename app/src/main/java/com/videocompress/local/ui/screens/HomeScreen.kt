@@ -25,6 +25,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -37,6 +38,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.videocompress.local.data.AppSettings
+import com.videocompress.local.data.SkipReason
+import com.videocompress.local.data.SyncResult
 import com.videocompress.local.data.VideoTask
 import com.videocompress.local.ui.HomeViewModel
 import com.videocompress.local.ui.components.FlatCard
@@ -53,7 +56,11 @@ import com.videocompress.local.util.formatResolution
  * 刻意做得简单：一屏能看到「还剩多少要压、正在压什么、按一下就开始」。
  */
 @Composable
-fun HomeScreen(vm: HomeViewModel, onOpenGuide: () -> Unit) {
+fun HomeScreen(
+    vm: HomeViewModel,
+    onOpenGuide: () -> Unit,
+    onOpenScanResult: () -> Unit
+) {
 
     val counts by vm.counts.collectAsStateWithLifecycle()
     val batch by vm.batch.collectAsStateWithLifecycle()
@@ -61,6 +68,7 @@ fun HomeScreen(vm: HomeViewModel, onOpenGuide: () -> Unit) {
     val running by vm.running.collectAsStateWithLifecycle()
     val isScanning by vm.isScanning.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
+    val scanResult by vm.lastScanResult.collectAsStateWithLifecycle()
 
     Column(
         modifier = Modifier
@@ -129,6 +137,9 @@ fun HomeScreen(vm: HomeViewModel, onOpenGuide: () -> Unit) {
                 )
             }
         }
+
+        // ------------------------------------------------------------ 扫描结果（重复/已过滤入口）
+        ScanSummaryCard(scanResult, onOpenScanResult)
 
         // ------------------------------------------------------------ 当前批次
         FlatCard {
@@ -330,5 +341,58 @@ private fun StatTile(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+    }
+}
+
+/** 首页扫描结果摘要：发现 / 新增 / 已跳过，点击可进入详情决定去留 */
+@Composable
+private fun ScanSummaryCard(
+    result: SyncResult?,
+    onOpenScanResult: () -> Unit
+) {
+    if (result == null || result.total == 0) return
+
+    val alreadyCount = result.countBy(SkipReason.ALREADY_IN_QUEUE)
+    val tooSmallCount = result.countBy(SkipReason.BELOW_MIN_SIZE)
+
+    FlatCard {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                SectionTitle("扫描结果")
+                Spacer(Modifier.weight(1f))
+                if (result.skipped.isNotEmpty()) {
+                    TextButton(onClick = onOpenScanResult) {
+                        Text("查看 ${result.skipped.size} 个")
+                    }
+                }
+            }
+
+            Row(modifier = Modifier.fillMaxWidth()) {
+                StatTile(
+                    modifier = Modifier.weight(1f),
+                    label = "相册视频",
+                    value = result.total.toString()
+                )
+                StatTile(
+                    modifier = Modifier.weight(1f),
+                    label = "新增任务",
+                    value = result.added.toString(),
+                    emphasize = true
+                )
+                StatTile(
+                    modifier = Modifier.weight(1f),
+                    label = "已跳过",
+                    value = result.skipped.size.toString(),
+                    emphasize = result.skipped.size > 0
+                )
+            }
+
+            if (result.skipped.isNotEmpty()) {
+                HintText(
+                    "其中 ${alreadyCount} 个已在队列（重复），${tooSmallCount} 个低于 ${result.minSizeMb} MB 限制，" +
+                        "点击查看后可选择移除重复任务。"
+                )
+            }
+        }
     }
 }
