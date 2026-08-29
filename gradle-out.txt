@@ -1,0 +1,25 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.11.1/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+A problem occurred configuring root project 'VideoCompressor'.
+> Could not resolve all artifacts for configuration 'classpath'.
+   > Could not download gradle-8.9.0.jar (com.android.tools.build:gradle:8.9.0)
+      > Could not get resource 'https://dl.google.com/dl/android/maven2/com/android/tools/build/gradle/8.9.0/gradle-8.9.0.jar'.
+         > Read timed out
+   > Could not download builder-8.9.0.jar (com.android.tools.build:builder:8.9.0)
+      > Could not get resource 'https://dl.google.com/dl/android/maven2/com/android/tools/build/builder/8.9.0/builder-8.9.0.jar'.
+         > Read timed out
+   > Could not download bundletool-1.17.2.jar (com.android.tools.build:bundletool:1.17.2)
+      > Could not get resource 'https://dl.google.com/dl/android/maven2/com/android/tools/build/bundletool/1.17.2/bundletool-1.17.2.jar'.
+         > Read timed out
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 17m 17s

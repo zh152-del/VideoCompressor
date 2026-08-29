@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- ==================================================================== -->
+    <!-- 权限：只申请视频处理真正需要的，绝不涉及通讯录/定位/电话/短信/摄像头/麦克风 -->
+    <!-- ==================================================================== -->
+
+    <!-- Android 13+ 读取视频 -->
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <!-- 旧版本读取存储 -->
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <!-- Android 9 及以下写入公共目录（用于把压缩后的视频写回相册） -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+
+    <!-- 前台服务：Android 15+ 的媒体处理类型 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROCESSING" />
+
+    <!-- 通知（Android 13+ 需要显式申请） -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- 息屏后保持 CPU 运行以完成编码，只在压缩期间持有 -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <application
+        android:name=".App"
+        android:allowBackup="false"
+        android:enableOnBackInvokedCallback="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.VideoCompressor"
+        tools:targetApi="36">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:launchMode="singleTop"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.VideoCompressor"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!--
+            视频压缩前台服务。
+            mediaProcessing 类型是 Android 15 官方为「媒体转码」这类耗时任务提供的类型。
+            stopWithTask=false：从最近任务划掉时不会立刻销毁，状态始终由数据库保证安全。
+        -->
+        <service
+            android:name=".service.CompressionService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProcessing"
+            android:stopWithTask="false" />
+    </application>
+
+</manifest>
