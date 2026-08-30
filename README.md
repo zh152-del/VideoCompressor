@@ -2,7 +2,7 @@
 
 完全本地运行的 Android 视频压缩 App。不联网、不上传、不需要登录账号，所有处理都在手机本地完成。
 
-- 目标设备：VIVO / OriginOS 4 优先，兼容主流 Android 版本
+- 目标设备：兼容主流 Android 版本
 - 最低支持：Android 8.0（API 26）
 - 目标版本：Android 16（API 36）
 - 不使用 Root、无障碍、悬浮窗、服务器、远程数据库
