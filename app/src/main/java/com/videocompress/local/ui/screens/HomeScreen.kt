@@ -13,7 +13,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.VideoLibrary
@@ -36,6 +35,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.net.Uri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.videocompress.local.data.AppSettings
 import com.videocompress.local.data.SkipReason
@@ -46,6 +46,7 @@ import com.videocompress.local.ui.components.FlatCard
 import com.videocompress.local.ui.components.HintText
 import com.videocompress.local.ui.components.SectionTitle
 import com.videocompress.local.ui.components.StatusChip
+import com.videocompress.local.ui.components.VideoThumbnail
 import com.videocompress.local.util.formatBytes
 import com.videocompress.local.util.formatDuration
 import com.videocompress.local.util.formatResolution
@@ -268,12 +269,7 @@ private fun BatchSlot(index: Int, task: VideoTask?) {
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                Icons.Default.Movie,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(28.dp)
-            )
+            VideoThumbnail(uri = Uri.parse(task.originalUri), sizeDp = 48)
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(

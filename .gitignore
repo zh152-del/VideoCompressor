@@ -45,3 +45,8 @@ build_results.txt
 app/keystore/
 *.jks
 *.keystore
+
+# HipsDaemon recovery scratch (not project source)
+.gradle.bak/
+ghome/
+del_lck.py

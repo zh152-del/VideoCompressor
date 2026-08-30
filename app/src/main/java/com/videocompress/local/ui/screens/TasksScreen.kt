@@ -49,6 +49,7 @@ import com.videocompress.local.media.MediaStorePublisher
 import com.videocompress.local.ui.HomeViewModel
 import com.videocompress.local.ui.components.HintText
 import com.videocompress.local.ui.components.StatusChip
+import com.videocompress.local.ui.components.VideoThumbnail
 import com.videocompress.local.util.formatBytes
 import com.videocompress.local.util.formatDuration
 import com.videocompress.local.util.formatResolution
@@ -233,6 +234,8 @@ private fun TaskRow(
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
+            VideoThumbnail(uri = Uri.parse(task.originalUri), sizeDp = 56)
+            Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = task.originalName,

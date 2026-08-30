@@ -116,9 +116,12 @@ class CompressionService : Service() {
 
             else -> startLoopIfNeeded()
         }
-        // 不使用 START_STICKY：被系统杀掉后不自动重启，
-        // 任务状态已经落库，用户重新打开 App 点「继续」即可，符合「不偷偷自启」的原则
-        return START_NOT_STICKY
+        // 使用 START_STICKY：压缩是用户在 App 前台点击「开始压缩」后才启动的，
+        // 属于用户明确意图；若压缩过程中进程被系统（如 VIVO/OriginOS 后台管理）
+        // 回收，系统会用 null intent 重建服务并继续处理剩余任务。
+        // 所有任务状态都已落库，requeueInterrupted 只把「处理中/已中断」重新入队，
+        // 已完成任务不会重复压缩，原视频也绝不会被误删。
+        return START_STICKY
     }
 
     private fun startLoopIfNeeded() {
@@ -131,7 +134,7 @@ class CompressionService : Service() {
         lastProgress = -1
 
         startForegroundSafe()
-        acquireWakeLock()
+        ensureWakeLock()
         CompressionController.setRunning(true)
 
         loopJob = scope.launch {
@@ -179,11 +182,20 @@ class CompressionService : Service() {
         }
     }
 
-    private fun acquireWakeLock() {
+    /**
+     * 确保持有 PARTIAL_WAKE_LOCK（息屏后仍能继续编码）。
+     *
+     * 幂等：若已经持有则不再重复申请。每一批开始前都会调用一次，
+     * 这样即使单个 WakeLock 的超时（WAKE_LOCK_TIMEOUT_MS）到期，
+     * 下一批也能重新续上，保证长时间批量压缩在息屏/充电不足等场景下仍然继续。
+     */
+    private fun ensureWakeLock() {
         runCatching {
             val pm = getSystemService(PowerManager::class.java)
-            wakeLock = pm?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "VideoCompressor:Encode")
-                ?.apply { acquire(WAKE_LOCK_TIMEOUT_MS) }
+            if (wakeLock == null || !wakeLock!!.isHeld) {
+                wakeLock = pm?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "VideoCompressor:Encode")
+                    ?.apply { acquire(WAKE_LOCK_TIMEOUT_MS) }
+            }
         }
     }
 
@@ -214,6 +226,7 @@ class CompressionService : Service() {
         var pauseReason: String? = null
 
         while (!cancelRequested && currentCoroutineContext().isActive) {
+            ensureWakeLock()
             val batch = dao.takeWaiting(settings.batchSize.coerceIn(1, 4))
             if (batch.isEmpty()) break
 

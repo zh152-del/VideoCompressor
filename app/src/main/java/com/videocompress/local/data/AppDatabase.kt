@@ -15,7 +15,7 @@ import androidx.room.TypeConverters
 @Database(
     entities = [VideoTask::class, LogEntry::class],
     version = 1,
-    exportSchema = true
+    exportSchema = false
 )
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
@@ -37,7 +37,12 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     DB_NAME
-                ).build().also { INSTANCE = it }
+                )
+                    // 允许在主版本降级时（例如从带「重复视频」表的中间构建回退到本版本）
+                    // 以重建数据库的方式兜底，避免 Room 因找不到迁移而直接崩溃。
+                    // 任务队列只是元数据，原视频始终保存在系统相册，重建不会丢视频。
+                    .fallbackToDestructiveMigration()
+                    .build().also { INSTANCE = it }
             }
     }
 }
