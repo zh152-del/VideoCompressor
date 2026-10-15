@@ -21,8 +21,8 @@ android {
         targetSdk = 36       // Android 16，满足 mediaProcessing 前台服务规范
         // 明确指定本机已安装的 build-tools，避免构建时再去联网下载
         buildToolsVersion = "36.0.0"
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
