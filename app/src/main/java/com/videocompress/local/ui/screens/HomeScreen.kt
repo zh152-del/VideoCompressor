@@ -140,7 +140,7 @@ fun HomeScreen(
         }
 
         // ------------------------------------------------------------ 扫描结果（重复/已过滤入口）
-        ScanSummaryCard(scanResult, onOpenScanResult)
+        ScanSummaryCard(scanResult, counts.total, onOpenScanResult)
 
         // ------------------------------------------------------------ 当前批次
         FlatCard {
@@ -199,8 +199,9 @@ fun HomeScreen(
                 Spacer(Modifier.width(8.dp))
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     HintText(
-                        "支持后台及锁屏处理，但系统或厂商后台策略可能中断任务。" +
-                            "任务状态会实时保存，中断后重新打开可继续。"
+                        "压缩期间屏幕会保持点亮，任务可后台继续；" +
+                            "系统或厂商后台策略仍可能中断，" +
+                            "任务状态会实时保存，重新打开可接着处理。"
                     )
                     HintText(
                         "压缩成功并通过完整校验后才会删除原视频；" +
@@ -344,6 +345,7 @@ private fun StatTile(
 @Composable
 private fun ScanSummaryCard(
     result: SyncResult?,
+    dbTotal: Int,
     onOpenScanResult: () -> Unit
 ) {
     if (result == null || result.total == 0) return
@@ -384,9 +386,23 @@ private fun ScanSummaryCard(
             }
 
             if (result.skipped.isNotEmpty()) {
+                // 「已发现 803」与「相册视频 639」对不上是正常口径差异，不是 bug：
+                //   803 = 数据库里的全部记录（含本 App 之前压缩出的文件）
+                //   639 = 本次扫描时排除了「本 App 自己输出」之后的数量
+                // 日志里能看到确实是 SCAN_SKIP_OWN_OUTPUT 排除了 185 个，
+                // 剩下的差异来自扫描时机，不做硬算术，只把两个口径各自说清楚。
+                val ownOutputCount = (dbTotal - result.total).coerceAtLeast(0)
                 HintText(
-                    "其中 ${alreadyCount} 个已在队列（重复），${tooSmallCount} 个低于 ${result.minSizeMb} MB 限制，" +
-                        "点击查看后可选择移除重复任务。"
+                    buildString {
+                        append("「已发现 $dbTotal」是库里全部视频；")
+                        append("「相册视频 ${result.total}」已排除本 App 之前压缩生成的 ")
+                        append("$ownOutputCount 个文件，避免重复压缩自己的产物。")
+                        if (alreadyCount > 0) append("另有 $alreadyCount 个已在队列中。")
+                        if (tooSmallCount > 0) {
+                            append("$tooSmallCount 个低于 ${result.minSizeMb} MB 限制。")
+                        }
+                        append("点击「查看」可逐条处理。")
+                    }
                 )
             }
         }

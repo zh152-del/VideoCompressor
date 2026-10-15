@@ -22,8 +22,23 @@ data class ProbeResult(
     val hasVideo: Boolean,
     val videoMime: String?,
     val isHdr: Boolean,
-    val frameRate: Float
-)
+    val frameRate: Float,
+    /**
+     * 原视频视频轨的目标码率（bps）；探测不到时为 0。
+     *
+     * 这是「反向压缩」判定的唯一依据：一个已经压得很狠的视频（屏幕录制、
+     * 直播录屏、老旧 480P），再压一遍只会更大。必须先量出它的码率，
+     * 才能在编码前就跳过，而不是白等几分钟压完再丢弃。
+     */
+    val videoBitrate: Int = 0
+) {
+    /** 视频轨平均码率（bps）；0 表示未探测到 */
+    val videoBitrateBps: Int get() = videoBitrate
+
+    /** 有码率数据时，每秒字节数（用于和目标码率直接比较） */
+    val videoBytesPerSecond: Long
+        get() = if (videoBitrate > 0) videoBitrate / 8L else 0L
+}
 
 /** 确认可以安全重新编码的输入编码格式 */
 private val SUPPORTED_INPUT_MIMES = setOf(
@@ -79,6 +94,7 @@ object VideoProbe {
             var isHdr = false
             var hasAudio = false
             var hasVideo = false
+            var videoBitrate = 0
 
             for (i in 0 until extractor.trackCount) {
                 val format = extractor.getTrackFormat(i)
@@ -105,6 +121,7 @@ object VideoProbe {
                         }
                         if (fps in 1..240) frameRate = fps.toFloat()
                         isHdr = detectHdr(format)
+                        videoBitrate = readBitrate(format)
                     }
                 } else if (mime.startsWith("audio/")) {
                     hasAudio = true
@@ -124,7 +141,8 @@ object VideoProbe {
                     hasVideo = hasVideo,
                     videoMime = videoMime,
                     isHdr = isHdr,
-                    frameRate = if (frameRate > 0f) frameRate else 30f
+                    frameRate = if (frameRate > 0f) frameRate else 30f,
+                    videoBitrate = videoBitrate
                 )
             }
         } catch (e: Exception) {
@@ -253,6 +271,31 @@ object VideoProbe {
             false
         } catch (e: Exception) {
             false
+        }
+    }
+
+    /**
+     * 读取视频轨的目标码率（bps）。
+     *
+     * 为什么必须读它：这是「反向压缩」判定的唯一依据。
+     * 一个已经被压得很狠的视频（屏幕录制、直播录屏、老旧 480P），
+     * 用任何常规档位再压一遍都只会更大 —— 用户白等几分钟、耗光电、还占空间。
+     * 只有先量出原视频码率，才能在「开始编码之前」就跳过。
+     *
+     * 厂商 ROM 可能不给 KEY_BIT_RATE（返回 0 或抛异常），此时返回 0 表示"未知"，
+     * 上层会退回到"压缩后按体积判断"的老路子上，不会误跳过。
+     */
+    private fun readBitrate(format: MediaFormat): Int {
+        return try {
+            if (format.containsKey(MediaFormat.KEY_BIT_RATE)) {
+                val bps = format.getInteger(MediaFormat.KEY_BIT_RATE)
+                // 明显不合理的值（0 / 负数 / 超大）一律当作"读不到"，宁可不知道也不瞎猜
+                if (bps in 1_000..200_000_000) bps else 0
+            } else {
+                0
+            }
+        } catch (e: Exception) {
+            0
         }
     }
 }

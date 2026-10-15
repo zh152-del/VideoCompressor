@@ -29,27 +29,86 @@ data class CompressionPlan(
 )
 
 /**
+ * 为什么这个视频不该压。
+ *
+ * 区分两种情况很重要，UI 上必须说人话：
+ *  - [AlreadyLowBitrate]：原视频码率本来就很低，再压只会更大 → 根本不用试
+ *  - [NoSavingsAchievable]：按当前设置无论怎么压都达不到收益要求
+ */
+sealed interface PlanRejection {
+    val reason: String
+
+    /** 原视频码率已低于本档目标码率，压缩必然导致文件变大 */
+    data class AlreadyLowBitrate(val sourceBps: Int, val targetBps: Int) : PlanRejection {
+        override val reason: String
+            get() = "原视频码率已足够低（${sourceBps / 1000} kbps ≤ 目标 ${targetBps / 1000} kbps），" +
+                "再压缩只会更大，已跳过"
+    }
+
+    /** 压到最低码率也达不到目标收益 */
+    data class NoSavingsAchievable(
+        val sourceBytes: Long,
+        val bestBytes: Long,
+        val requiredSavingsPercent: Int
+    ) : PlanRejection {
+        override val reason: String
+            get() {
+                val actualSavings = if (sourceBytes > 0) {
+                    (100 - (bestBytes * 100 / sourceBytes)).coerceAtLeast(0)
+                } else 0
+                return "按当前设置压到最低码率也只能省 $actualSavings%，" +
+                    "达不到 ${requiredSavingsPercent}% 的收益要求，已跳过并保留原视频"
+            }
+    }
+}
+
+/**
  * 根据质量档位、分辨率策略与源视频信息计算编码参数。
+ *
+ * 返回 null 表示「不该压」，但**必须通过 [CompressionPlanFactory.lastRejection]
+ * 拿到原因** —— UI 要区分「原视频码率已经很低」和「压不出收益」，
+ * 这两件事对用户是完全不同的建议。
  *
  * 目标：
  *  1. 只降不升 —— 分辨率永远不会被放大
  *  2. 有收益 —— 预估输出体积必须明显小于原文件，否则建议跳过
- *  3. 不追求极限 —— 码率有下限，宁可跳过也不把视频压成一坨马赛克
+ *  3. 不做无用功 —— 原视频码率已经低于目标时**在编码前就跳过**
+ *     （这是「反向压缩」的根治点：以前是压完几分钟才发现变大，白耗时间和电）
+ *  4. 不追求极限 —— 码率有下限，宁可跳过也不把视频压成一坨马赛克
  */
 object CompressionPlanFactory {
 
     private const val MIN_VIDEO_BITRATE = 400_000        // 400 kbps
     private const val MAX_VIDEO_BITRATE = 80_000_000     // 80 Mbps
 
+    /**
+     * 原视频码率低于「目标码率 × 本系数」时直接跳过。
+     *
+     * 为什么留 15% 余量而不是「低于即跳」：
+     *  如果原视频码率恰好等于目标码率，重编码后体积可能持平；
+     *  但容器开销、音频重采样等会让输出略大。要求目标码率至少比原视频高 15%，
+     *  才能保证压缩后确实变小。这个系数是「宁可少压几个，也绝不反向压缩」的取舍。
+     */
+    private const val BITRATE_HEADROOM = 0.85
+
+    /** 上一次 [create] 返回 null 的原因；成功时为 null。仅供同一次调用后立即读取。 */
+    @Volatile
+    var lastRejection: PlanRejection? = null
+        private set
+
     fun create(
         probe: ProbeResult,
         originalSize: Long,
         settings: AppSettings
     ): CompressionPlan? {
+        // 每次调用都先清空，避免读到上一次调用留下的原因
+        lastRejection = null
+
         val displayWidth = probe.displayWidth
         val displayHeight = probe.displayHeight
         if (displayWidth <= 0 || displayHeight <= 0) {
             AppLog.w("PLAN_SKIP", "无法解析分辨率，跳过")
+            lastRejection = null
             return null
         }
 
@@ -94,6 +153,26 @@ object CompressionPlanFactory {
 
         val audioBitrate = if (probe.hasAudio) settings.quality.audioBitrate else 0
 
+        // ---------------------------------------------------------- 反向压缩前置判定
+        // 原视频码率已经低于本档目标时，再压必然变大 —— 这时直接放弃，
+        // 不编码、不耗电、不占空间。这比"压完再按体积丢弃"早了整整一个编码过程。
+        // 只有探测到真实码率（>0）才判；探测不到（部分 ROM 不给 KEY_BIT_RATE）就跳过这个判断，
+        // 保守地交给后面的体积校验兜底。
+        val sourceBps = probe.videoBitrate
+        if (sourceBps > 0) {
+            val targetTotalBps = videoBitrate + audioBitrate
+            if (sourceBps <= (targetTotalBps * BITRATE_HEADROOM).toInt()) {
+                val rejection = PlanRejection.AlreadyLowBitrate(sourceBps, targetTotalBps)
+                AppLog.i(
+                    "PLAN_ALREADY_LOW_BITRATE",
+                    "原视频码率已低于目标，跳过压缩 " +
+                        "source=${sourceBps / 1000}kbps target=${targetTotalBps / 1000}kbps"
+                )
+                lastRejection = rejection
+                return null
+            }
+        }
+
         // ---------------------------------------------------------- 收益约束
         // 用「目标收益」反推一个体积预算，保证压缩后确实能变小
         val durationSec = (probe.durationMs / 1000f).coerceAtLeast(1f)
@@ -120,6 +199,11 @@ object CompressionPlanFactory {
                     "按当前设置无法达到 ${settings.minSavingsPercent}% 收益，跳过 " +
                         "original=$originalSize estimated=$estimated"
                 )
+                lastRejection = PlanRejection.NoSavingsAchievable(
+                    sourceBytes = originalSize,
+                    bestBytes = estimated,
+                    requiredSavingsPercent = settings.minSavingsPercent
+                )
                 return null
             }
         }
@@ -131,9 +215,11 @@ object CompressionPlanFactory {
                 "outDisplay=${outDisplayWidth}x${outDisplayHeight} " +
                 "scaleFrame=${scaleWidth}x$scaleHeight scaled=$scaled " +
                 "videoBitrate=$videoBitrate audioBitrate=$audioBitrate " +
+                "srcBitrate=${sourceBps / 1000}kbps " +
                 "estimate=${estimated / 1024}KB"
         )
 
+        lastRejection = null
         return CompressionPlan(
             scaleWidth = scaleWidth,
             scaleHeight = scaleHeight,

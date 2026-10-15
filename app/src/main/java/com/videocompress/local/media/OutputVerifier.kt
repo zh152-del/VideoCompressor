@@ -170,8 +170,19 @@ object OutputVerifier {
         // -------------------------------------------------- 5. 体积收益
         val minAllowed = (source.size * (100 - minSavingsPercent) / 100f).toLong()
         if (minSavingsPercent > 0 && size > minAllowed) {
+            // 文案要说清楚「这是正常判定，不是压缩失败」。
+            // 旧文案是「压缩后没有变小」，用户会以为 App 坏了；
+            // 实际上绝大多数情况是原视频本来就压得很好，再压只会更大。
+            val actualSavings = if (source.size > 0) {
+                100 - (size * 100 / source.size)
+            } else 0
+            val verdict = when {
+                size > source.size -> "原视频本身已压得很紧（${source.size / 1024}KB），" +
+                    "再次压缩只会更大（${size / 1024}KB）"
+                else -> "压缩后仅减少 $actualSavings%，未达到 ${minSavingsPercent}% 的收益要求"
+            }
             return VerifyResult.NoGain(
-                "压缩后没有变小（原 ${source.size / 1024}KB，输出 ${size / 1024}KB）"
+                "$verdict。原视频已保留，压缩结果已丢弃。${compressionHint(probe)}"
             )
         }
 
@@ -189,5 +200,21 @@ object OutputVerifier {
             durationMs = probe.durationMs,
             hasAudio = probe.hasAudio
         )
+    }
+
+    /**
+     * 给出下一步可执行建议。
+     *
+     * 只说"没收益"用户不知道该干什么；告诉他「这个视频调低分辨率档再试」，
+     * 或者「换个档位」才有意义。
+     */
+    private fun compressionHint(probe: ProbeResult): String {
+        val pixels = probe.displayWidth.toLong() * probe.displayHeight
+        return when {
+            // 已经是 480P 级别，再降分辨率意义不大了
+            pixels <= 854L * 480L -> "这类视频分辨率已经很低，建议不再压缩"
+            pixels <= 1280L * 720L -> "可尝试把「输出分辨率」降到 480P 获得更大收益"
+            else -> "可尝试把「输出分辨率」降到 720P，或使用「高压缩」档位"
+        }
     }
 }

@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.net.Uri
 import android.os.Build
+import android.view.WindowManager
 import android.os.IBinder
 import android.os.PowerManager
 import androidx.core.app.ServiceCompat
@@ -17,6 +18,7 @@ import com.videocompress.local.data.VideoTask
 import com.videocompress.local.media.CompressOutcome
 import com.videocompress.local.media.CompressionEngine
 import com.videocompress.local.media.CompressionPlanFactory
+import com.videocompress.local.media.PlanRejection
 import com.videocompress.local.media.DeleteResult
 import com.videocompress.local.media.DeviceGuard
 import com.videocompress.local.media.MediaStorePublisher
@@ -77,6 +79,19 @@ class CompressionService : Service() {
 
     private var engine: CompressionEngine? = null
     private var wakeLock: PowerManager.WakeLock? = null
+
+    /**
+     * 本次压缩是否已请求过屏幕常亮（仅用于日志追踪）。
+     *
+     * 实际的常亮窗口由 Activity 的 `setKeepScreenOn` 持有；
+     * 服务侧曾在后台线程尝试 addView 方案，但实测在 Android 10+ 全部失败：
+     *  · TYPE_PHONE / TYPE_APPLICATION_OVERLAY 需要 SYSTEM_ALERT_WINDOW 权限
+     *    → BadTokenException: permission denied for window type 2002
+     *  · View 必须在有 Looper 的线程创建，服务在 IO 线程
+     *    → RuntimeException: Can't create handler inside thread
+     * 因此改为 Activity 侧持有（无权限需求、一定有 Looper）。
+     */
+    private var screenOnHeld = false
     private var loopJob: Job? = null
 
     @Volatile
@@ -199,6 +214,20 @@ class CompressionService : Service() {
         }
     }
 
+    /**
+     * 服务销毁时的屏幕常亮清理。
+     *
+     * 屏幕常亮现在由 Activity 的 `window.setKeepScreenOn(running)` 负责
+     * （见 MainActivity），这里只留一个明确的结束标记，方便在日志里
+     * 确认「这次压缩期间屏幕确实被保持点亮过」。
+     */
+    private fun releaseScreenOn() {
+        if (screenOnHeld) {
+            AppLog.i("SCREEN_ON_EXIT", "压缩结束，恢复屏幕自动熄灭")
+            screenOnHeld = false
+        }
+    }
+
     // ------------------------------------------------------------------ 主循环
 
     /**
@@ -213,10 +242,11 @@ class CompressionService : Service() {
         // 上次被系统打断的「待处理」任务重新入队（状态完整，不会重复压缩已完成的）
         dao.requeueInterrupted()
 
+        screenOnHeld = true
         AppLog.i(
             "SERVICE_START",
             "压缩服务启动 batchSize=${settings.batchSize} quality=${settings.quality.name} " +
-                "resolution=${settings.resolution.name}"
+                "resolution=${settings.resolution.name}（屏幕常亮由 Activity 持有）"
         )
 
         var processed = 0
@@ -333,8 +363,25 @@ class CompressionService : Service() {
             // -------------------------------------------------- 3. 编码计划
             val plan = CompressionPlanFactory.create(probe, task.originalSize, settings)
             if (plan == null) {
-                finishAs(dao, task, TaskStatus.SKIPPED, ERR_NO_BENEFIT,
-                    "按当前设置无法有效压缩，已跳过并保留原视频", startedAt, previousRetries + 1)
+                // create() 一定会写明拒绝原因；拿不到就退回通用文案，绝不含糊。
+                // 两种原因给不同错误码，便于日志里区分：
+                //   ERR_ALREADY_LOW_BITRATE = 原视频码率本来就低（不是设置问题）
+                //   ERR_NO_BENEFIT           = 当前设置压不出收益（可以调设置解决）
+                val rejection = CompressionPlanFactory.lastRejection
+                val errorCode = when (rejection) {
+                    is PlanRejection.AlreadyLowBitrate -> ERR_ALREADY_LOW_BITRATE
+                    else -> ERR_NO_BENEFIT
+                }
+                AppLog.i(
+                    "TASK_SKIPPED",
+                    "code=$errorCode name=${task.originalName} " +
+                        "reason=${rejection?.reason ?: "无原因（异常兜底）"}"
+                )
+                finishAs(
+                    dao, task, TaskStatus.SKIPPED, errorCode,
+                    rejection?.reason ?: "按当前设置无法有效压缩，已跳过并保留原视频",
+                    startedAt, previousRetries + 1
+                )
                 return StepResult.Skipped
             }
 
@@ -612,6 +659,10 @@ class CompressionService : Service() {
         runCatching { wakeLock?.let { if (it.isHeld) it.release() } }
         wakeLock = null
 
+        // 恢复屏幕自动熄灭。不恢复的话用户会变成"以后手机都不息屏"，
+        // 这是必须清理的副作用。
+        releaseScreenOn()
+
         // 把仍在「处理中 / 验证中」的任务复位成「已中断」。
         // 少了这一步，服务被系统回收后任务会永远卡在「压缩中」：
         // 用户既看不到进度，也没有任何入口可以重试，只能清数据重装。
@@ -645,6 +696,9 @@ class CompressionService : Service() {
         const val ERR_CANCELLED = 8011
         const val ERR_DELETE_NEED_CONSENT = 8012
         const val ERR_DELETE_FAILED = 8013
+
+        /** 反向压缩：原视频码率已低于本档目标，再压只会更大 */
+        const val ERR_ALREADY_LOW_BITRATE = 8014
         const val ERR_UNEXPECTED = 8099
 
         fun startIntent(context: Context): Intent =

@@ -1,6 +1,7 @@
 package com.videocompress.local
 
 import android.app.Application
+import com.videocompress.local.data.SettingsRepository
 import com.videocompress.local.data.TaskRepository
 import com.videocompress.local.media.clearTempFiles
 import com.videocompress.local.service.CompressionController
@@ -17,6 +18,9 @@ import kotlinx.coroutines.launch
  *  1. 把上次残留的「处理中」任务恢复成「已中断」，等待用户确认后继续
  *  2. 清理残留临时文件
  *
+ * 另外会做一次设置默认值迁移（1.1 → 1.2），把被实测证明不合理的旧默认值
+ * 升级掉，但保留用户手动改过的值。
+ *
  * 这里不会自动启动压缩服务 —— 压缩必须由用户在 App 前台点击「开始压缩」触发。
  */
 class App : Application() {
@@ -27,6 +31,9 @@ class App : Application() {
         AppLog.i("APP_START", "App 启动")
 
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            // 设置迁移与压缩无关，随时可做，放在最前面保证本次启动就生效
+            runCatching { SettingsRepository(this@App).migrateLegacyDefaults() }
+
             // 这两件事都必须在「压缩服务没有在跑」的前提下做，否则会互相打架：
             //  - recoverInterruptedTasks(): 会把「正在编码」的任务误当成上次崩溃的残留，
             //    直接重置成已中断，进度归零不说，还可能让同一个视频被压两遍。

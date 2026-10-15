@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -63,7 +64,12 @@ fun SettingsScreen(vm: HomeViewModel, onOpenGuide: () -> Unit) {
         // ------------------------------------------------------------ 质量
         FlatCard {
             SectionTitle("压缩质量")
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 QualityPreset.entries.forEach { preset ->
                     OptionChip(
                         label = preset.label,
@@ -78,7 +84,14 @@ fun SettingsScreen(vm: HomeViewModel, onOpenGuide: () -> Unit) {
         // ------------------------------------------------------------ 分辨率
         FlatCard {
             SectionTitle("输出分辨率")
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // 横向可滚动：4 个选项在窄屏上必然放不下（真机上 480P 被压成竖排单字）。
+            // 可滚动比折行/压缩按钮要好——按钮永远保持正常的最小可点面积。
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 ResolutionOption.entries.forEach { option ->
                     OptionChip(
                         label = option.label,
@@ -87,7 +100,7 @@ fun SettingsScreen(vm: HomeViewModel, onOpenGuide: () -> Unit) {
                     )
                 }
             }
-            HintText("只会下调分辨率，绝不把小视频放大：4K→1080P，1080P→1080P，720P→720P。")
+            HintText("只会下调分辨率，绝不把小视频放大：4K→1080P，1080P→1080P，720P→720P。左右滑动可查看全部选项。")
         }
 
         // ------------------------------------------------------------ 原视频处理
@@ -164,18 +177,26 @@ fun SettingsScreen(vm: HomeViewModel, onOpenGuide: () -> Unit) {
             SectionTitle("安全策略")
             SwitchRow(
                 title = "跳过 HDR / 10bit 视频",
-                subtitle = "这类视频无法保证安全转换，直接跳过并保留原视频",
+                subtitle = "开启后这类视频直接跳过不处理；关闭则尝试压缩，" +
+                    "若结果未通过校验仍会自动保留原视频（失败也不丢文件）",
                 checked = settings.skipHdr,
                 onCheckedChange = { value -> vm.updateSettings { it.copy(skipHdr = value) } }
             )
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             SwitchRow(
                 title = "跳过不支持的编码格式",
-                subtitle = "仅处理 H.264 / H.265 / MPEG4 / VP8 / VP9 / AV1 等常见编码",
+                subtitle = "仅处理 H.264 / H.265 / MPEG4 / VP8 / VP9 / AV1 等常见编码，" +
+                    "建议保持开启：非标准编码强行转码风险高",
                 checked = settings.skipUnsupportedCodec,
                 onCheckedChange = { value ->
                     vm.updateSettings { it.copy(skipUnsupportedCodec = value) }
                 }
+            )
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            HintText(
+                "无论这些开关怎么设，一条底线不变：" +
+                    "只有输出文件通过完整校验（可播放 / 时长一致 / 不放大 / 体积真的变小）后，" +
+                    "才会按上面的开关决定是否删除原视频。任何一步失败都会完整保留原文件。"
             )
         }
 
@@ -259,12 +280,25 @@ fun SettingsScreen(vm: HomeViewModel, onOpenGuide: () -> Unit) {
     }
 }
 
+/**
+ * 单选按钮。
+ * `softWrap = false` + `maxLines = 1` 是必须的：分辨率那一排有 4 个选项
+ * （原分辨率 / 1080P / 720P / 480P），窄屏上最后一个会被挤到只剩 1 个字符宽，
+ * `480P` 竖着排成「4 8 0 P」（真机实测到的现象）。
+ * 文字禁止换行后，FilterChip 会保持自身最小宽度，多出来的一律挤成可滚动。
+ */
 @Composable
 private fun OptionChip(label: String, selected: Boolean, onClick: () -> Unit) {
     FilterChip(
         selected = selected,
         onClick = onClick,
-        label = { Text(label) },
+        label = {
+            Text(
+                text = label,
+                maxLines = 1,
+                softWrap = false
+            )
+        },
         colors = FilterChipDefaults.filterChipColors(
             selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
             selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer

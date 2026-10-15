@@ -1,12 +1,9 @@
 package com.videocompress.local.ui.components
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -42,28 +39,35 @@ import com.videocompress.local.data.TaskStatus
 import com.videocompress.local.media.ThumbnailLoader
 
 /**
- * 扁平卡片。
+ * 通用内容卡片。
  *
- * 卡片容器与整页背景同色，只用一条 1dp 描边做分隔，
- * 避免界面上出现一层层的灰白色块。
+ * ## 注意：这个名字是历史遗留，实际已是玻璃卡片
+ *
+ * 早期这里有两套并存的卡片：`FlatCard`（纯描边扁平）和 `GlassVideoCard`（玻璃）。
+ * 前者被首页 / 扫描结果 / 设置 / 指南四屏用了 21 处，后者只有任务列表在用，
+ * 结果同一个 App 里出现两种完全不同的卡片语言 —— 这就是用户反馈的
+ * 「一部分有玻璃效果，一部分没有」。
+ *
+ * 现在统一到玻璃：保留 `FlatCard` 这个函数名（避免动 21 处调用点），
+ * 但内部直接委托给 [GlassCard]，视觉语言与任务列表完全一致。
+ * 新代码请直接用 [GlassCard]，需要缩略图时传 `thumbnail` 参数。
  */
 @Composable
 fun FlatCard(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit
 ) {
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        ),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    // 无缩略图、关闭动态背景、较小模糊半径：
+    // 这四个屏都是短内容或表单区，不需要逐帧动画，也不需要强模糊。
+    GlassCard(
+        modifier = modifier,
+        thumbnail = null,
+        blurRadius = 10.dp,
+        animatedBackdrop = false,
+        contentPadding = 16.dp
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
+            modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             content()
@@ -117,17 +121,17 @@ fun StatusChip(status: TaskStatus) {
 
 /** 通用小标签 */
 /**
- * 视频缩略图。
+ * 在 IO 线程加载系统缩略图。
  *
- * 直接复用系统为相册生成的缩略图，不读取视频正文、不引入额外解码库。
- * 加载在 IO 线程进行，失败只显示默认图标，绝不抛异常、绝不阻塞压缩/扫描/删除。
+ * 单独抽出来，是因为同一张封面要被用两次：
+ * 一次做清晰的小图（用户得能认出是哪条视频），
+ * 一次做玻璃卡片的模糊底图（见 [com.videocompress.local.ui.components.GlassVideoCard]）。
+ * 共用同一个 remember，避免同一条视频重复读两次 IO。
+ *
+ * 失败返回 null —— 绝不抛异常、绝不阻塞压缩/扫描/删除。
  */
 @Composable
-fun VideoThumbnail(
-    uri: Uri,
-    modifier: Modifier = Modifier,
-    sizeDp: Int = 56
-) {
+fun rememberVideoThumbnail(uri: Uri): Bitmap? {
     val context = LocalContext.current
     var bitmap by remember(uri) { mutableStateOf<Bitmap?>(null) }
 
@@ -139,6 +143,24 @@ fun VideoThumbnail(
                 .onFailure { /* 保持 null，显示默认图标 */ }
         }
     }
+    return bitmap
+}
+
+/**
+ * 视频缩略图（清晰小图）。
+ *
+ * 直接复用系统为相册生成的缩略图，不读取视频正文、不引入额外解码库。
+ * 加载在 IO 线程进行，失败只显示默认图标，绝不抛异常、绝不阻塞压缩/扫描/删除。
+ */
+@Composable
+fun VideoThumbnail(
+    uri: Uri,
+    modifier: Modifier = Modifier,
+    sizeDp: Int = 56,
+    preloaded: Bitmap? = null
+) {
+    // 外部（如玻璃卡片）已经加载过就直接用，避免同一条视频重复读两次 IO
+    val bitmap = preloaded ?: rememberVideoThumbnail(uri)
 
     Box(
         modifier = modifier

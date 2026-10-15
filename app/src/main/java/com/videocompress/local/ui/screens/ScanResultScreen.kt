@@ -31,11 +31,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.videocompress.local.data.SkipReason
 import com.videocompress.local.data.SkippedVideo
 import com.videocompress.local.data.SyncResult
 import com.videocompress.local.ui.HomeViewModel
 import com.videocompress.local.ui.components.FlatCard
+import com.videocompress.local.ui.components.GlassCard
 import com.videocompress.local.ui.components.HintText
 import com.videocompress.local.util.formatBytes
 import com.videocompress.local.util.formatDuration
@@ -87,7 +89,7 @@ fun ScanResultScreen(
                             vm.removeTaskByUri(video.uri)
                         }
                     )
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    // 玻璃卡片自带边缘光描边，再加分隔线会显得脏
                 }
             }
 
@@ -107,7 +109,7 @@ fun ScanResultScreen(
                         actionIcon = Icons.Default.Settings,
                         onAction = onOpenSettings
                     )
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    // 玻璃卡片自带边缘光描边，再加分隔线会显得脏
                 }
             }
 
@@ -198,6 +200,15 @@ private fun SectionHeader(
     }
 }
 
+/**
+ * 跳过/重复列表里的一条。
+ *
+ * 早期版本这里是一根 `HorizontalDivider` 分隔的纯文本行，跟任务列表的玻璃卡片
+ * 完全是两套语言。现在统一走 [GlassCard]，与全 App 保持一致。
+ *
+ * 文件名同样两行 + 中间省略：单行会把
+ * `ScreenRecording_11-09-2025 02-31-32_1.mp4` 截成认不出的 `ScreenRecording_11-…`。
+ */
 @Composable
 private fun SkippedVideoRow(
     video: SkippedVideo,
@@ -205,46 +216,50 @@ private fun SkippedVideoRow(
     actionIcon: androidx.compose.ui.graphics.vector.ImageVector,
     onAction: () -> Unit
 ) {
-    Column(
+    GlassCard(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
+            .padding(horizontal = 16.dp, vertical = 5.dp),
+        blurRadius = 8.dp,
+        contentPadding = 12.dp
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                Icons.Default.Movie,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(28.dp)
-            )
-            Spacer(Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = video.name,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = "${formatBytes(video.size)} · " +
-                        "${formatResolution(video.width, video.height, 0)} · " +
-                        formatDuration(video.durationMs),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextButton(onClick = onAction, modifier = Modifier.height(32.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
-                    actionIcon,
+                    Icons.Default.Movie,
                     contentDescription = null,
-                    modifier = Modifier.size(16.dp)
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(28.dp)
                 )
-                Spacer(Modifier.width(4.dp))
-                Text(actionLabel)
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = video.name,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        lineHeight = 17.sp
+                    )
+                    Text(
+                        text = "${formatBytes(video.size)} · " +
+                            "${formatResolution(video.width, video.height, 0)} · " +
+                            formatDuration(video.durationMs),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = onAction, modifier = Modifier.height(32.dp)) {
+                    Icon(
+                        actionIcon,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(actionLabel)
+                }
             }
         }
     }
